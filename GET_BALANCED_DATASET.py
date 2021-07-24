@@ -9,13 +9,16 @@ import requests
 import time
 import io
 import pandas as pd
+import random
 
 INTERVALS = (int(1e3), int(1e4), int(1e5), int(1e6)) # Intervalos de los grupos
-NUM_PROCESS = 1	# Numero de procesos
-TARGET_PER_PART = 50 # Cuantos de cada grupo sacar por parte, 50 es recomendado.
+NUM_PROCESS = 4	# Numero de procesos
 TARGET_OVERALL = 5000 # Cuantos de cada grupo sacar al finalizar el programa.
 SAVE_DIR = "./balanced_dataset_medium/" # Donde guardar las descargas
 COLUMNS_NAMES = ["ID", "part", "label", "views", "comments", "likes", "dislikes", "topicID"] # Nombres de columnas del CSV.
+CURRENT_OVERALL = [0, 0, 0, 0]
+
+BORRARESTODESPUES = 0
 
 # Funcion para ver a que label pertenece el dato.
 def identify_group(views):
@@ -67,7 +70,7 @@ def get_image_info(part, vidID, group, imgDict):
 
 
 # Se descarga la imagen
-def download_image(part, urlMedium, urlDefault, vidID):
+def download_image(urlMedium, urlDefault, vidID):
 
 	imgData = requests.get(urlMedium).content
 	
@@ -82,73 +85,90 @@ def download_image(part, urlMedium, urlDefault, vidID):
 
 # Se descargan todas las imagenes por parte y se sacan sus datos.
 # Solo se descargan imagenes que tengan views publicas.
-def get_image(part):
+def get_image(jsons, IDs, part):
 
 	start = time.time()
 
 	infos = []
 
-	gg = [0, 0, 0, 0]
+	global CURRENT_OVERALL
+
+	global BORRARESTODESPUES
+	BORRARESTODESPUES += len(jsons)
+
+	for rd, ID in zip(jsons, IDs):
+
+		if "viewCount" in rd["items"][0]["statistics"]:
+			group = identify_group(int(rd["items"][0]["statistics"]["viewCount"]))
+		else:
+			continue
+		if group == -1 or CURRENT_OVERALL[group] >= TARGET_OVERALL:
+			continue
+
+		urlMedium = rd["items"][0]["snippet"]["thumbnails"]["medium"]["url"]
+		urlDefault = rd["items"][0]["snippet"]["thumbnails"]["default"]["url"]
+
+		if "topicDetails" in rd["items"][0]:
+			topicIDs = rd["items"][0]["topicDetails"]["relevantTopicIds"]
+			if not ('/m/07yv9' in topicIDs):
+				continue
+		else:
+			continue
+
+		if not download_image(urlMedium, urlDefault, ID):
+			continue
+
+		CURRENT_OVERALL[group] += 1
+
+		print("Downloaded image group\t", group, "\tGoal:\t", CURRENT_OVERALL[group], "/", TARGET_OVERALL)
+
+		row = get_image_info(part, ID, group, rd)
+		infos.append(row)
+
+	print(part, time.time() - start, "\n", "g1:", CURRENT_OVERALL[0], "\n", "g2:", CURRENT_OVERALL[1], "\n", "g3:", CURRENT_OVERALL[2], "\n", "g4:", CURRENT_OVERALL[3], "\n", "\n")
+
+	return infos
+
+def read_json(path):
+
+	with open(path, "r", encoding="utf-8") as js:
+		rd = json.load(js)
+
+	return rd
+
+def multi_read_json(part):
+
+	paths = []
+	IDs = []
 
 	partDir = "./metadata/" + part
 
 	for subdir, dirs, files in os.walk(partDir):
-
 		for f in files:
+			paths.append(subdir + "/" + f)
+			IDs.append(f[:-5])
 
-			with open(subdir + "/" + f, "r", encoding="utf-8") as js:
-				rd = json.load(js)
+	res = ThreadPool(NUM_PROCESS).map(read_json, paths)
 
-			if "viewCount" in rd["items"][0]["statistics"]:
-				group = identify_group(int(rd["items"][0]["statistics"]["viewCount"]))
-			else:
-				continue
-			if group == -1 or gg[group] >= TARGET_PER_PART:
-				continue
+	return res, IDs
 
-			if "topicDetails" in rd["items"][0]:
-				topicIDs = rd["items"][0]["topicDetails"]["relevantTopicIds"]
-				if not ('/m/07yv9' in topicIDs):
-					continue
-				#else:
-				#	print(topicIDs)
-				#	print("found vehiculo")
-			else:
-				continue
+def startScan(parts):
 
-			urlMedium = rd["items"][0]["snippet"]["thumbnails"]["medium"]["url"]
-			urlDefault = rd["items"][0]["snippet"]["thumbnails"]["default"]["url"]
-
-			if not download_image(part, urlMedium, urlDefault, f[:-5]):
-				continue
-
-			gg[group] += 1
-
-			row = get_image_info(part, f[:-5], group, rd)
-			infos.append(row)
-
-			if all(x >= TARGET_PER_PART for x in gg):
-				break
-
-	print(part, time.time() - start, "\n", "g1:", gg[0], "\n", "g2:", gg[1], "\n", "g3:", gg[2], "\n", "g4:", gg[3], "\n", "\n")
-
-	return infos
-
-# Para descargar imagenes en varios procesos a la vez.
-# Al final se crea el CSV (Cuando se descarga todo)
-def multi_get_image(numProcess, parts):
-
-	res = ThreadPool(numProcess).map(get_image, parts)
+	start = time.time()
 
 	table = []
+	for part in parts:
+		jsons, IDs = multi_read_json(part)
+		res = get_image(jsons, IDs, part)
+		table.extend(res)
 
-	for r in res:
-		table.extend(r)
+		if TARGET_OVERALL[0] >= 5000 and TARGET_OVERALL[1] >= 5000 and TARGET_OVERALL[2] >= 5000 and TARGET_OVERALL[3] >= 5000:
+			break
 
 	df = pd.DataFrame(table, columns=COLUMNS_NAMES)
-	df.to_csv(SAVE_DIR + "data_info.csv")
 
-	return 1
+	print(BORRARESTODESPUES / (time.time() - start), "json/s")
+	df.to_csv(SAVE_DIR + "data_info.csv")
 
 
 # Creamos los directorios.
@@ -164,9 +184,7 @@ except:
 
 # Escanemaos las partes.
 subDirs = [f.name for f in os.scandir("./metadata/") if f.is_dir()]
-
-# Calculamos cuantas partes son necesarias para llegar al target overall.
-numParts = int(TARGET_OVERALL/TARGET_PER_PART)
+random.shuffle(subDirs)
 
 # Descargamos las imagenes
-multi_get_image(NUM_PROCESS, subDirs[:numParts])
+startScan(subDirs[:2])
