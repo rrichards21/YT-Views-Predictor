@@ -162,7 +162,7 @@ def startScan(parts):
 		res = get_image(jsons, IDs, part)
 		table.extend(res)
 
-		if TARGET_OVERALL[0] >= 5000 and TARGET_OVERALL[1] >= 5000 and TARGET_OVERALL[2] >= 5000 and TARGET_OVERALL[3] >= 5000:
+		if CURRENT_OVERALL[0] >= 5000 and CURRENT_OVERALL[1] >= 5000 and CURRENT_OVERALL[2] >= 5000 and CURRENT_OVERALL[3] >= 5000:
 			break
 
 	df = pd.DataFrame(table, columns=COLUMNS_NAMES)
