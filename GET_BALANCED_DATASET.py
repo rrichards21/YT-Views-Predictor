@@ -106,6 +106,16 @@ def get_image(part):
 			if group == -1 or gg[group] >= TARGET_PER_PART:
 				continue
 
+			if "topicDetails" in rd["items"][0]:
+				topicIDs = rd["items"][0]["topicDetails"]["relevantTopicIds"]
+				if not ('/m/07yv9' in topicIDs):
+					continue
+				#else:
+				#	print(topicIDs)
+				#	print("found vehiculo")
+			else:
+				continue
+
 			urlMedium = rd["items"][0]["snippet"]["thumbnails"]["medium"]["url"]
 			urlDefault = rd["items"][0]["snippet"]["thumbnails"]["default"]["url"]
 
