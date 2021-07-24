@@ -184,7 +184,6 @@ except:
 
 # Escanemaos las partes.
 subDirs = [f.name for f in os.scandir("./metadata/") if f.is_dir()]
-random.shuffle(subDirs)
 
 # Descargamos las imagenes
-startScan(subDirs[:2])
+startScan(subDirs)
